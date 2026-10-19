@@ -1,0 +1,9 @@
+build/
+*.apk
+*.keystore
+*.jks
+.DS_Store
+# Satoshi may not be redistributed (see launcher/assets/fonts/README.md).
+launcher/assets/fonts/*.ttf
+launcher/assets/fonts/*.otf
+launcher/assets/fonts/*.txt
