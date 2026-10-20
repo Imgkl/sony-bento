@@ -6,6 +6,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.View;
 
@@ -89,6 +90,10 @@ public class HomeView extends View {
     private List<Item> items = Collections.emptyList();
     private final List<Target> targets = new ArrayList<>();
     private int focused = -1;
+    /** Boot countdown on the focused tile: 0 to 1 while it fills, or -1 when no countdown runs. */
+    private float countdown = -1;
+    private long countdownStart, countdownLength;
+    private Runnable countdownDone;
 
     public HomeView(Context context) {
         super(context);
@@ -145,6 +150,41 @@ public class HomeView extends View {
             }
         }
         invalidate();
+    }
+
+    /**
+     * Fills the focused tile from left to right over {@code length} ms, then runs {@code done}. The tile ends
+     * in the normal focus style. Timed by the clock, not ValueAnimator, so the animation speed setting has no effect.
+     */
+    void startCountdown(long length, Runnable done) {
+        countdownStart = SystemClock.uptimeMillis();
+        countdownLength = length;
+        countdownDone = done;
+        countdown = 0;
+        postOnAnimation(this::stepCountdown);
+    }
+
+    /** Stops a running countdown and shows the normal focus; returns false if none was running. */
+    boolean cancelCountdown() {
+        if (countdown < 0) return false;
+        countdown = -1;
+        countdownDone = null;
+        invalidate();
+        return true;
+    }
+
+    private void stepCountdown() {
+        if (countdown < 0) return;
+        float t = Math.min(1, (SystemClock.uptimeMillis() - countdownStart) / (float) countdownLength);
+        countdown = t < 0.5f ? 2 * t * t : 1 - (float) Math.pow(-2 * t + 2, 2) / 2; // ease in and out
+        invalidate();
+        if (t < 1) {
+            postOnAnimation(this::stepCountdown);
+            return;
+        }
+        Runnable done = countdownDone;
+        cancelCountdown();
+        if (done != null) done.run();
     }
 
     Kind focusedKind() {
@@ -218,7 +258,8 @@ public class HomeView extends View {
         for (int i = 0; i < targets.size(); i++) {
             Target t = targets.get(i);
             boolean on = i == focused;
-            tile(canvas, t.rect, on ? INK : TILE);
+            boolean filling = on && countdown >= 0;
+            tile(canvas, t.rect, on && !filling ? INK : TILE);
             if (on) {
                 stroke.setColor(INK);
                 stroke.setStrokeWidth(d(3));
@@ -229,7 +270,15 @@ public class HomeView extends View {
             switch (t.kind) {
                 case WIFI: drawWifi(canvas, t.rect, on); break;
                 case REMOTE: drawRemote(canvas, t.rect, on); break;
-                default: drawItem(canvas, t.rect, items.get(t.index), on); break;
+                default: drawItem(canvas, t.rect, items.get(t.index), on && !filling); break;
+            }
+            if (filling && t.kind == Kind.ITEM) {
+                // The focused look, revealed from the left edge as the countdown runs.
+                canvas.save();
+                canvas.clipRect(t.rect.left, t.rect.top, t.rect.left + t.rect.width() * countdown, t.rect.bottom);
+                tile(canvas, t.rect, INK);
+                drawItem(canvas, t.rect, items.get(t.index), true);
+                canvas.restore();
             }
         }
     }

@@ -48,6 +48,8 @@ public class MainActivity extends Activity {
     private static final String INPUT_ORDER = "input_order";
     /** Only switch automatically this soon after a boot, never as a surprise later. */
     private static final long BOOT_SWITCH_WINDOW_MS = 3 * 60 * 1000;
+    /** How long the input tile fills before the boot switch, so you can see it coming and cancel it. */
+    private static final long BOOT_COUNTDOWN_MS = 3000;
 
     private HomeView view;
     private final List<Intent> targets = new ArrayList<>();
@@ -153,6 +155,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        view.cancelCountdown();
         unregisterReceiver(updates);
         resumed = false;
         pausedAt = SystemClock.uptimeMillis();
@@ -170,6 +173,10 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        // Any remote button except volume cancels the boot countdown and keeps you on Home.
+        boolean volume = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE;
+        if (!volume && view.cancelCountdown()) return true;
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_RIGHT:
             case KeyEvent.KEYCODE_DPAD_DOWN:
@@ -244,7 +251,11 @@ public class MainActivity extends Activity {
         // The HDMI inputs register a few seconds after Home first shows, so this runs once they appear.
         if (switchAfterBoot && last != null && inputIds.contains(last)) {
             switchAfterBoot = false;
-            if (SystemClock.elapsedRealtime() < BOOT_SWITCH_WINDOW_MS) open(inputIds.indexOf(last));
+            if (SystemClock.elapsedRealtime() < BOOT_SWITCH_WINDOW_MS) {
+                int index = inputIds.indexOf(last);
+                view.focusItem(index);
+                view.startCountdown(BOOT_COUNTDOWN_MS, () -> open(index));
+            }
         }
     }
 

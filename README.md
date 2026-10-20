@@ -22,7 +22,7 @@ Tested on a BRAVIA BF1 (Android TV 12, API 31) with an Apple TV on HDMI 2 and a 
 
 **Black screen after the Apple TV wakes the TV.** After a long standby, the Apple TV wakes the TV over HDMI-CEC, but the screen stays black. The MediaTek TV agent asks the TV player to tune to the CEC device input (`HDMI200008`), and the TV player ignores that request when it comes from behind the Home app. The launcher listens for Sony's `com.sony.dtv.intent.action.ONE_TOUCH_PLAY` broadcast. When it arrives while Home is in front, the launcher opens the HDMI hardware input for that port itself (`TvContract.buildChannelUriForPassthroughInput`), and the picture comes back.
 
-**Power cut.** After a power cut, the TV boots to Home and not to the last input. On the first start after a boot (`Settings.Global.BOOT_COUNT`), within 3 minutes of boot, the launcher opens the last used input as soon as the HDMI inputs register.
+**Power cut.** After a power cut, the TV boots to Home and not to the last input. On the first start after a boot (`Settings.Global.BOOT_COUNT`), within 3 minutes of boot, the launcher opens the last used input once the HDMI inputs register. First its tile fills from left to right for 3 seconds, so you can see the switch coming. Press any remote button except volume to cancel it and stay on Home.
 
 ## Build and install
 
