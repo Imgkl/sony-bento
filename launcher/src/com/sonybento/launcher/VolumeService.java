@@ -7,31 +7,51 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.media.AudioManager;
+import android.os.SystemClock;
+import android.util.Log;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 
 /**
- * Takes the remote's volume keys, changes the volume without asking for the system volume bar, and
- * shows the edge island instead.
+ * Shows the edge island for every media volume and mute change. Sony's firmware hands the volume keys
+ * straight to AudioService, which always raises the stock volume bar, so this closes that bar as soon as
+ * the volume moves. The close is only allowed because this service owns a visible accessibility overlay.
  */
 public class VolumeService extends AccessibilityService {
 
-    private AudioManager audio;
+    private static final String VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION";
+    private static final String MUTE_CHANGED = "android.media.STREAM_MUTE_CHANGED_ACTION";
+    private static final String STREAM = "android.media.EXTRA_VOLUME_STREAM_TYPE";
+    private static final String VALUE = "android.media.EXTRA_VOLUME_STREAM_VALUE";
+    private static final String PREVIOUS = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE";
+
     private IslandView island;
 
-    /** Any volume or mute change, ours (the adjust lands asynchronously) or another app's. */
+    /** AudioService sends one broadcast per stream that follows the media volume; only STREAM_MUSIC's own counts. */
     private final BroadcastReceiver changes = new BroadcastReceiver() {
         @Override
+        @SuppressWarnings("deprecation")
         public void onReceive(Context context, Intent intent) {
-            island.sync();
+            long received = SystemClock.uptimeMillis();
+            if (intent.getIntExtra(STREAM, -1) != AudioManager.STREAM_MUSIC) return;
+            if (MUTE_CHANGED.equals(intent.getAction())) {
+                island.pressMute();
+                return;
+            }
+            int value = intent.getIntExtra(VALUE, 0), previous = intent.getIntExtra(PREVIOUS, 0);
+            if (value == previous) return;
+            // Foreground queue, like the system's own close, so queued background broadcasts cannot delay it.
+            sendBroadcast(new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS).addFlags(Intent.FLAG_RECEIVER_FOREGROUND));
+            long closed = SystemClock.uptimeMillis();
+            Log.i("BentoVol", "volume " + previous + " -> " + value + " received at " + received);
+            Log.i("BentoVol", "close sent at " + closed + " (" + (closed - received) + " ms after receipt)");
+            island.press(value > previous ? 1 : -1);
         }
     };
 
     @Override
     protected void onServiceConnected() {
-        audio = getSystemService(AudioManager.class);
         island = new IslandView(this);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 Math.round(120 * getResources().getDisplayMetrics().density),
@@ -43,37 +63,9 @@ public class VolumeService extends AccessibilityService {
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
         getSystemService(WindowManager.class).addView(island, lp);
-        IntentFilter filter = new IntentFilter("android.media.VOLUME_CHANGED_ACTION");
-        filter.addAction("android.media.STREAM_MUTE_CHANGED_ACTION");
+        IntentFilter filter = new IntentFilter(VOLUME_CHANGED);
+        filter.addAction(MUTE_CHANGED);
         registerReceiver(changes, filter);
-    }
-
-    @Override
-    public boolean onKeyEvent(KeyEvent event) {
-        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
-        switch (event.getKeyCode()) {
-            case KeyEvent.KEYCODE_VOLUME_UP:
-            case KeyEvent.KEYCODE_VOLUME_DOWN:
-                if (down) {
-                    int dir = event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
-                    adjust(dir > 0 ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER);
-                    island.press(dir);
-                }
-                return true;
-            case KeyEvent.KEYCODE_VOLUME_MUTE:
-                if (down && event.getRepeatCount() == 0) {
-                    adjust(AudioManager.ADJUST_TOGGLE_MUTE);
-                    island.pressMute();
-                }
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /** Flags 0: no FLAG_SHOW_UI, so the system bar stays away, and no click sound. */
-    private void adjust(int direction) {
-        audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, 0);
     }
 
     @Override

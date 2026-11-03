@@ -100,6 +100,7 @@ final class IslandView extends View {
         digits(level, 0, 0);
         sync();
         lv.x = lv.target;
+        if (muted) pinch();
     }
 
     private static Drawable tinted(Context context, int id, int color) {
@@ -108,33 +109,29 @@ final class IslandView extends View {
         return icon;
     }
 
-    /** A volume key press: dir is 1 for up and -1 for down. */
+    /** A volume change: dir is 1 for up and -1 for down. */
     void press(int dir) {
         if (state == State.HIDDEN) w.v = Math.max(w.v, W * 2.8f);
         else if (state == State.NUB) w.v = Math.max(w.v, W * 1.6f);
         show();
         h.v += dir * H * 0.45f;
         w.v += W * 0.75f;
+        sync();
     }
 
-    /** A mute key press. The new mute state itself arrives through sync(). */
+    /** A mute or unmute. The island pinches into the nub on dismiss while muted, and hides otherwise. */
     void pressMute() {
         show();
         h.v -= H * 1.1f;
         w.v += W * 1.5f;
+        sync();
     }
 
-    /** Reads the real volume and mute state and reacts to whatever changed, from a key or from elsewhere. */
-    void sync() {
+    private void sync() {
         int next = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
-        boolean nextMuted = audio.isStreamMute(AudioManager.STREAM_MUSIC);
         if (next != level) digits(next, next > level ? 1 : -1, SystemClock.uptimeMillis());
         level = next;
-        if (nextMuted != muted) {
-            muted = nextMuted;
-            if (!muted && state == State.NUB) hide(NH * 0.7f);
-            else if (muted && state == State.HIDDEN) pinch();
-        }
+        muted = audio.isStreamMute(AudioManager.STREAM_MUSIC);
         lv.target = muted ? 0 : level * 100f / max;
         loop();
     }
@@ -150,8 +147,14 @@ final class IslandView extends View {
     }
 
     private void dismiss() {
-        if (muted) pinch();
-        else hide(H * 0.6f);
+        if (muted) {
+            pinch();
+            return;
+        }
+        state = State.HIDDEN;
+        w.target = 0;
+        h.target = H * 0.6f;
+        loop();
     }
 
     /** Height pulls in first and the width follows, so the island squeezes into the mute nub. */
@@ -160,14 +163,6 @@ final class IslandView extends View {
         h.target = NH;
         h.v -= H * 0.4f;
         postDelayed(pinchWidth, PINCH_WIDTH_DELAY_MS);
-        loop();
-    }
-
-    private void hide(float height) {
-        state = State.HIDDEN;
-        removeCallbacks(pinchWidth);
-        w.target = 0;
-        h.target = height;
         loop();
     }
 

@@ -4,12 +4,15 @@
     android:versionCode="1"
     android:versionName="1.0">
 
-    <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="34" />
+    <!-- Target 30 keeps Android 12's lockdown of CLOSE_SYSTEM_DIALOGS off, so VolumeService can close the stock volume bar. -->
+    <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Android only reveals the Wi-Fi network name to apps with location access. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Below target 31 the Bluetooth calls check this legacy permission, not BLUETOOTH_CONNECT. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
