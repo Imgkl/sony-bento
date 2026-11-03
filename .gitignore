@@ -2,6 +2,13 @@ build/
 *.apk
 *.keystore
 *.jks
+# Device authorization and private signing material stay outside Git.
+adbkey
+adbkey.pub
+*.pk8
+*.pem
+*.key
+*.p12
 .DS_Store
 # Satoshi may not be redistributed (see launcher/assets/fonts/README.md).
 launcher/assets/fonts/*.ttf

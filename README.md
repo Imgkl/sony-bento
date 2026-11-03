@@ -24,6 +24,21 @@ Tested on a BRAVIA BF1 (Android TV 12, API 31) with an Apple TV on HDMI 2 and a 
 
 **Power cut.** After a power cut, the TV boots to Home and not to the last input. On the first start after a boot (`Settings.Global.BOOT_COUNT`), within 3 minutes of boot, the launcher opens the last used input once the HDMI inputs register. First its tile fills from left to right for 3 seconds, so you can see the switch coming. Press any remote button except volume to cancel it and stay on Home.
 
+## Volume island
+
+An optional dial on the left edge replaces Sony's bottom volume display. Its outline stays steady while the ticks and counter move. Both the Sony remote and Apple TV HDMI-CEC keep their normal audio-control path.
+
+The enabled accessibility service connects to the TV's own ADB daemon at `127.0.0.1:5555`. It starts a fixed helper as Android's shell user, which registers for the system volume-display callbacks and sends the real volume/mute state to the island. No root, bootloader unlock or firmware modification is used. After one-time provisioning, normal boot and reconnect happen on the TV without a computer.
+
+### Setup requirements and limits
+
+- Validated on a Sony K-65S30 running Android 12/API 31. This uses internal Android APIs; firmware updates and other models need compatibility testing.
+- A fresh APK install does **not** provision the volume helper. The current installation was provisioned separately: the TV must already authorize a device-specific ADB key, and its PKCS#8 private key must be in the app's private `files/adb-private.pk8` storage. There is currently no first-run pairing flow. The app never enrolls a new key automatically.
+- Keep debugging and the Sony Bento accessibility service enabled. On the provisioned TV, `adb_allowed_connection_time` is set to `0` to prevent authorization expiring during long downtime. This is a device-wide debugging setting, not part of the APK. Network ADB still requires an authorized key.
+- Private keys, signing keystores and device captures must stay outside Git and the APK. App backup is disabled. Updating with `adb install -r` preserves app data; clearing data, uninstalling or revoking debugging authorization requires provisioning again.
+- Disabling the service or recovering from a helper failure attempts to restore Sony's display by restarting the verified SystemUI process. This can briefly interrupt system UI and depends on ADB remaining available. Recovery has a cooldown and a persistent retry limit; repeated failures pause the island and offer an explicit Retry action.
+- Safe-volume warnings require explicit confirmation. The helper does not automatically remove the safe-volume limit.
+
 ## Build and install
 
 You need the Android SDK (build-tools 36.1.0 and platform `android-36`), a JDK 17 or newer, and adb access to the TV. To get it, open Settings > System > About, select "Android TV OS build" 7 times, then turn on USB debugging in Developer options. On my TV, adb then also listens on the network at port 5555.

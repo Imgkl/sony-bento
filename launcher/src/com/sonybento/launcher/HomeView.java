@@ -105,7 +105,7 @@ public class HomeView extends View {
         setBackgroundColor(BG);
     }
 
-    private static Typeface font(Context context, String file) {
+    static Typeface font(Context context, String file) {
         try {
             return Typeface.createFromAsset(context.getAssets(), "fonts/" + file);
         } catch (RuntimeException e) {

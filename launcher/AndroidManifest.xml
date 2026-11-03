@@ -5,6 +5,7 @@
     android:versionName="1.0">
 
     <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="34" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Android only reveals the Wi-Fi network name to apps with location access. -->
@@ -32,5 +33,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".VolumeService"
+            android:exported="true"
+            android:label="Sony Bento volume"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/volume_service" />
+        </service>
+        <receiver android:name=".VolumeService$RetryReceiver" android:exported="false" />
     </application>
 </manifest>
