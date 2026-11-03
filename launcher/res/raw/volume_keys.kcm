@@ -1,0 +1,7 @@
+# Remaps the remotes' volume buttons (Linux key codes) to keys the system has no meaning for,
+# so they reach VolumeService instead of the stock volume bar.
+type OVERLAY
+
+map key 113 F10
+map key 114 F11
+map key 115 F12
