@@ -5,6 +5,7 @@
     android:versionName="1.0">
 
     <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="34" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Android only reveals the Wi-Fi network name to apps with location access. -->
@@ -42,11 +43,6 @@
             </intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/volume_service" />
         </service>
-        <receiver android:name=".VolumeKeyLayout" android:exported="true" android:label="Sony Bento volume keys">
-            <intent-filter>
-                <action android:name="android.hardware.input.action.QUERY_KEYBOARD_LAYOUTS" />
-            </intent-filter>
-            <meta-data android:name="android.hardware.input.metadata.KEYBOARD_LAYOUTS" android:resource="@xml/volume_key_layouts" />
-        </receiver>
+        <receiver android:name=".VolumeService$RetryReceiver" android:exported="false" />
     </application>
 </manifest>

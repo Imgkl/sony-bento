@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="volume_service_description">Shows volume at the side of the screen for both remotes. Turn off this service to restore Sony’s volume display.</string>
+</resources>
