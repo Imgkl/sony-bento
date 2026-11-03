@@ -23,10 +23,10 @@ public class VolumeService extends AccessibilityService {
     private static final String VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION";
     private static final String MUTE_CHANGED = "android.media.STREAM_MUTE_CHANGED_ACTION";
     private static final String STREAM = "android.media.EXTRA_VOLUME_STREAM_TYPE";
-    private static final String VALUE = "android.media.EXTRA_VOLUME_STREAM_VALUE";
-    private static final String PREVIOUS = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE";
 
     private IslandView island;
+    private AudioManager audio;
+    private int lastLevel, direction = 1;
 
     /** AudioService sends one broadcast per stream that follows the media volume; only STREAM_MUSIC's own counts. */
     private final BroadcastReceiver changes = new BroadcastReceiver() {
@@ -39,19 +39,23 @@ public class VolumeService extends AccessibilityService {
                 island.pressMute();
                 return;
             }
-            int value = intent.getIntExtra(VALUE, 0), previous = intent.getIntExtra(PREVIOUS, 0);
-            if (value == previous) return;
             // Foreground queue, like the system's own close, so queued background broadcasts cannot delay it.
             sendBroadcast(new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS).addFlags(Intent.FLAG_RECEIVER_FOREGROUND));
             long closed = SystemClock.uptimeMillis();
-            Log.i("BentoVol", "volume " + previous + " -> " + value + " received at " + received);
+            // Sony's broadcast carries the same old and new value, so the direction comes from our last read.
+            int level = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            if (level != lastLevel) direction = level > lastLevel ? 1 : -1;
+            Log.i("BentoVol", "volume " + lastLevel + " -> " + level + " received at " + received);
             Log.i("BentoVol", "close sent at " + closed + " (" + (closed - received) + " ms after receipt)");
-            island.press(value > previous ? 1 : -1);
+            lastLevel = level;
+            island.press(direction);
         }
     };
 
     @Override
     protected void onServiceConnected() {
+        audio = getSystemService(AudioManager.class);
+        lastLevel = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
         island = new IslandView(this);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 Math.round(120 * getResources().getDisplayMetrics().density),
