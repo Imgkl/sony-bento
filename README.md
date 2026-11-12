@@ -1,144 +1,43 @@
 # Sony Bento
 
-A small, ad-free Home screen for a Sony BRAVIA Google TV that is only used as a screen for an Apple TV and a PlayStation.
+A quieter Sony BRAVIA: a simple Home screen and a volume dial that leaves your subtitles alone. Built for an Apple TV and PlayStation setup.
 
-![Sony Bento on the TV](docs/home.png)
+![Sony Bento Home screen with a clock, connection status and HDMI input tiles](docs/home.png)
 
-The stock Google TV home is full of ads and content rows. This launcher replaces it with one bento grid: a clock, the Wi-Fi and remote status, today's date, and a tile for each HDMI device. A debloat script removes Sony and Google ads, trackers and apps that this setup does not use.
+## A Home screen for your devices
 
-Tested on a BRAVIA BF1 (Android TV 12, API 31) with an Apple TV on HDMI 2 and a PS5 on HDMI 1.
+Open Apple TV, PlayStation or another named HDMI input from one uncluttered grid. Tiles keep their position and show the real input status. Wi-Fi and remote settings are one click away; the clock and date stay out of the D-pad path.
 
-## What the launcher does
+No ads, recommendations or content rows.
 
-- **Inputs:** one tile for each HDMI input that has a name in the TV settings. The tile shows the real input state from `TvInputManager`: On (live signal), Standby, or Not connected. Apple TV and PlayStation get their logos.
-- **Fixed order:** a tile keeps its position after you first see it, so the layout never jumps.
-- **Focus:** Home opens with the focus on the input you used last.
-- **Wi-Fi tile:** network name, signal bars, Wi-Fi standard and link speed. Select it to open the Wi-Fi settings.
-- **Remote tile:** shows if the Bluetooth remote is connected. Select it to open the remote settings.
-- **Clock and date:** display only, so they are skipped by the D-pad.
-- **Corners:** iOS-style continuous corners (squircles), drawn with the Figma corner-smoothing method in [`SmoothCorners.java`](launcher/src/com/sonybento/launcher/SmoothCorners.java).
+## Volume at the edge
 
-### Two fixes for Sony firmware bugs
+![Before: Sony’s bottom volume display overlaps subtitles. After: Bento’s dial sits on the left edge, leaving subtitles clear.](docs/volume-before-after.svg)
 
-**Black screen after the Apple TV wakes the TV.** After a long standby, the Apple TV wakes the TV over HDMI-CEC, but the screen stays black. The MediaTek TV agent asks the TV player to tune to the CEC device input (`HDMI200008`), and the TV player ignores that request when it comes from behind the Home app. The launcher listens for Sony's `com.sony.dtv.intent.action.ONE_TOUCH_PLAY` broadcast. When it arrives while Home is in front, the launcher opens the HDMI hardware input for that port itself (`TvContract.buildChannelUriForPassthroughInput`), and the picture comes back.
+*Layout illustration; overlays enlarged for clarity.*
 
-**Power cut.** After a power cut, the TV boots to Home and not to the last input. On the first start after a boot (`Settings.Global.BOOT_COUNT`), within 3 minutes of boot, the launcher opens the last used input once the HDMI inputs register. First its tile fills from left to right for 3 seconds, so you can see the switch coming. Press any remote button except volume to cancel it and stay on Home.
+The optional volume island replaces Sony’s bottom display with a small dial on the left. The outline stays steady while the ticks and number move together. Muting leaves a small orange indicator.
 
-## Volume island
+- **Both remotes work:** Sony remote and Apple TV over HDMI-CEC.
+- **Runs on the TV:** reconnects automatically after setup, with no computer needed during use.
+- **No root:** uses a locally authorized helper; no bootloader unlock or firmware patch.
 
-An optional dial on the left edge replaces Sony's bottom volume display. Its outline stays steady while the ticks and counter move. Both the Sony remote and Apple TV HDMI-CEC keep their normal audio-control path.
+## Get started
 
-The enabled accessibility service connects to the TV's own ADB daemon at `127.0.0.1:5555`. It starts a fixed helper as Android's shell user, which registers for the system volume-display callbacks and sends the real volume/mute state to the island. No root, bootloader unlock or firmware modification is used. After one-time provisioning, normal boot and reconnect happen on the TV without a computer.
+Tested on **Sony K-65S30 / BRAVIA BF1, Android TV 12**. Other models and firmware versions need testing.
 
-### Setup requirements and limits
+| Guide | What’s inside |
+| --- | --- |
+| [Build, install and recovery](docs/setup.md) | Requirements, installation, HDMI wake behavior and volume-helper limits |
+| [Debloat and restore](debloat/README.md) | The exact package list, settings changed and how to undo them |
+| [Fonts](launcher/assets/fonts/README.md) | Satoshi setup and the included IBM Plex Mono font |
 
-- Validated on a Sony K-65S30 running Android 12/API 31. This uses internal Android APIs; firmware updates and other models need compatibility testing.
-- A fresh APK install does **not** provision the volume helper. The current installation was provisioned separately: the TV must already authorize a device-specific ADB key, and its PKCS#8 private key must be in the app's private `files/adb-private.pk8` storage. There is currently no first-run pairing flow. The app never enrolls a new key automatically.
-- Keep debugging and the Sony Bento accessibility service enabled. On the provisioned TV, `adb_allowed_connection_time` is set to `0` to prevent authorization expiring during long downtime. This is a device-wide debugging setting, not part of the APK. Network ADB still requires an authorized key.
-- Private keys, signing keystores and device captures must stay outside Git and the APK. App backup is disabled. Updating with `adb install -r` preserves app data; clearing data, uninstalling or revoking debugging authorization requires provisioning again.
-- Disabling the service or recovering from a helper failure attempts to restore Sony's display by restarting the verified SystemUI process. This can briefly interrupt system UI and depends on ADB remaining available. Recovery has a cooldown and a persistent retry limit; repeated failures pause the island and offer an explicit Retry action.
-- Safe-volume warnings require explicit confirmation. The helper does not automatically remove the safe-volume limit.
-
-## Build and install
-
-You need the Android SDK (build-tools 36.1.0 and platform `android-36`), a JDK 17 or newer, and adb access to the TV. To get it, open Settings > System > About, select "Android TV OS build" 7 times, then turn on USB debugging in Developer options. On my TV, adb then also listens on the network at port 5555.
-
-1. Download [Satoshi](https://www.fontshare.com/fonts/satoshi) and copy `Satoshi-Regular.ttf`, `Satoshi-Bold.ttf` and `Satoshi-Black.ttf` into `launcher/assets/fonts/`. The font licence does not allow the files in this repository.
-2. Build: `./launcher/build.sh`. The APK is signed with your Android debug key and written to `launcher/build/sony-bento.apk`.
-3. Install and grant the permissions. Android only shows the Wi-Fi name to apps with location access, and the remote status needs Bluetooth access.
-
-   ```bash
-   adb connect <tv-ip>:5555
-   adb install -r launcher/build/sony-bento.apk
-   adb shell pm grant com.sonybento.launcher android.permission.ACCESS_FINE_LOCATION
-   adb shell pm grant com.sonybento.launcher android.permission.BLUETOOTH_CONNECT
-   ```
-
-4. Give each HDMI input a name in the TV settings (for example "Apple TV"). Inputs without a name do not get a tile.
-5. Run the debloat script below. It also makes Sony Bento the Home app.
-
-## Debloat
-
-[`debloat/debloat.sh`](debloat/debloat.sh) removes apps for user 0 with `pm uninstall -k --user 0`. The original APKs stay on the read-only system partition, so nothing is deleted for good. No root is needed.
-
-```bash
-BRAVIA_IP=<tv-ip> ./debloat/debloat.sh            # debloat and set Sony Bento as Home
-BRAVIA_IP=<tv-ip> ./debloat/debloat.sh restore    # put everything back
-```
-
-A factory reset also restores everything. A Sony firmware update can bring some apps back. If that happens, run the script again.
-
-### Removed (33 packages)
-
-**Ads, promos and trackers**
-
-| Package | What it is |
-|---|---|
-| `tv.samba.ssm` | Samba TV. Recognises what is on screen for ad targeting. |
-| `com.sony.dtv.promos` | "My BRAVIA" promo content |
-| `com.sony.dtv.sonyselect` | Sony Select, the promoted apps row |
-| `com.sony.dtv.notificationcenter` | BRAVIA notifications (promo pop-ups) |
-| `com.sony.dtv.sonytab` | Sony content tab |
-| `com.sony.dtv.interactivetvutil` | Uploads Sony usage, viewing and voice logs |
-| `com.google.android.feedback` | Play Store feedback agent |
-| `com.google.android.play.games` | Play Games |
-| `com.google.android.videos` | Google Play Movies |
-| `com.google.android.youtube.tvmusic` | YouTube Music |
-
-**Apps this setup does not use**
-
-| Package | What it is |
-|---|---|
-| `com.sony.dtv.multiscreendemo` | Store demo mode |
-| `com.sony.dtv.smarthelp`, `com.sony.dtv.helpguidecontents` | Built-in help (99 MB) |
-| `com.sony.dtv.voicesearch` | Sony voice search |
-| `com.sony.dtv.ecodashboard` | Eco dashboard |
-| `com.sony.dtv.sktvfb`, `com.sony.dtv.operatorapputil.service` | Channel editor and cable operator apps |
-| `com.mediatek.tv.oneworld.logdump`, `com.mediatek.tv.oneworld.logdumpservice`, `com.mediatek.tv.diagnosis` | MediaTek debug log tools |
-| `com.mediatek.wwtv.mediaplayer` | USB media player |
-| `com.sony.dtv.all4launcher`, `com.sony.dtv.iplayerlauncher`, `com.sony.dtv.itvlauncher`, `com.sony.dtv.my5launcher`, `com.sony.dtv.soundslauncher`, `com.youview.poa` | UK TV app shortcuts |
-| `com.amazon.amazonvideo.livingroom`, `com.netflix.ninja`, `com.netflix.tokenmanager` | Prime Video and Netflix (watched on the Apple TV instead) |
-| `com.google.android.apps.tv.dreamx` | Google Ambient Mode, the screensaver with suggestions |
-| `com.google.android.katniss` | Google Assistant and voice. This also removes the always-on mic permission. |
-| `com.google.android.syncadapters.calendar` | Google Calendar sync |
-
-### Disabled (3 packages)
-
-These are disabled with `pm disable-user --user 0`, not removed:
-
-| Package | Why disabled and not removed |
-|---|---|
-| `com.google.android.apps.tv.launcherx` | The Google TV home. If it stays on, it takes Home back after its 30-second boot timeout. |
-| `com.google.android.tungsten.setupwraith` | Google setup. Its recovery screen claims Home with a higher priority. |
-| `com.sonypicturescore` | Sony Pictures Core store. Sony's device control service crashes if this app is removed fully. |
-
-### Settings changed
-
-- Home app: `cmd package set-home-activity com.sonybento.launcher/.MainActivity`
-- Screensaver off (it pointed at the removed Ambient Mode).
-
-### Do not remove
-
-These broke the TV when I removed them. Sony's system service and the MediaTek TV agent read their content providers at boot, and the TV crash-looped after a cold boot:
-
-- `com.sony.dtv.m2.seeds.iot`, `com.sony.dtv.m2.seeds.auth`
-- `com.sony.dtv.demosupport`, `com.sony.dtv.demosystemsupport`
-
-Also leave these alone, because they run HDMI, CEC and the TV itself:
-
-- `com.mediatek.tv.oneworld.tvcenter` (the player that shows HDMI)
-- `com.mediatek.tis` (HDMI inputs)
-- `com.mediatek.tv.agent` (CEC One Touch Play)
-- `com.mediatek.dtv.tvinput.framework.server`
-- `com.sony.dtv.sonysystemservice`
-- `com.sony.dtv.connecteddevicesettings` (CEC settings)
-- Google Play services
-
-I also uninstalled 9 apps that I had installed myself. They are not part of the script.
+**Volume setup is currently manual.** Installing the APK alone doesn’t enable the island: it needs an authorized ADB key in private app storage, debugging and the accessibility service enabled. There is no first-run pairing flow yet. See the [setup requirements](docs/setup.md#setup-requirements-and-limits). Recovery can briefly restart SystemUI; repeated failures pause the island.
 
 ## Credits
 
 - [Satoshi](https://www.fontshare.com/fonts/satoshi) by Indian Type Foundry (ITF Free Font License, not included).
+- [IBM Plex Mono](https://github.com/IBM/plex) by IBM, for the volume dial's number (SIL Open Font License, included).
 - Settings and remote icons: [Tabler Icons](https://tabler.io/icons) (MIT, by Paweł Kuna).
 - Apple and PlayStation logos: [Simple Icons](https://simpleicons.org) (CC0). The logos are trademarks of Apple Inc. and Sony Interactive Entertainment.
 - This project is not affiliated with Sony, Google, Apple or MediaTek.

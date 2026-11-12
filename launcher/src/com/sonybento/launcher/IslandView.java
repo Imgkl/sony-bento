@@ -19,7 +19,7 @@ final class IslandView extends View {
 
     private static final float W = 40, H = 150, NW = 22, NH = 32, RADIUS = 18, FILLET = 14;
     private static final float NUMBER = 15, NUMBER_Y = 18, DIAL_TOP = 36, DIAL_BOTTOM = 12, TICK_GAP = 4;
-    private static final long SHOW_MS = 2000, OPEN_MS = 380, CLOSE_MS = 260, PINCH_MS = 320;
+    private static final long SHOW_MS = 1500, OPEN_MS = 220, CLOSE_MS = 180, PINCH_MS = 220;
     private static final char[] DIGITS = "0123456789".toCharArray();
 
     enum State { HIDDEN, FULL, NUB }
@@ -83,12 +83,14 @@ final class IslandView extends View {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path shape = new Path();
     private final Drawable offAccent;
     private final float digitWidth, numberShift;
     /** Open drives hidden to full; pinch drives full (or hidden) to the mute nub. */
     private final Tween open = new Tween(), pinch = new Tween();
-    private final Spring dial = new Spring(260), counter = new Spring(520);
+    /** Equal stiffness so the counter and the dial land on a new level at the same moment. */
+    private final Spring dial = new Spring(700), counter = new Spring(700);
     private final Spring[] springs = {dial, counter};
     private final Runnable dismiss = this::dismiss;
     private final Runnable frameCallback = this::frame;
@@ -106,9 +108,8 @@ final class IslandView extends View {
     IslandView(Context context) {
         super(context);
         dp = getResources().getDisplayMetrics().density;
-        text.setTypeface(HomeView.font(context, "Satoshi-Black.ttf"));
+        text.setTypeface(HomeView.font(context, "IBMPlexMono-SemiBold.ttf"));
         text.setTextSize(d(NUMBER));
-        text.setFontFeatureSettings("tnum");
         text.setTextAlign(Paint.Align.CENTER);
         text.setColor(HomeView.INK);
         Paint.FontMetrics m = text.getFontMetrics();
@@ -117,6 +118,9 @@ final class IslandView extends View {
         line.setStyle(Paint.Style.STROKE);
         line.setStrokeCap(Paint.Cap.ROUND);
         fill.setColor(0xFF000000);
+        rim.setStyle(Paint.Style.STROKE);
+        rim.setStrokeWidth(d(1));
+        rim.setColor(0x29FFFFFF);
         offAccent = context.getDrawable(R.drawable.ic_volume_3).mutate();
         offAccent.setTint(HomeView.ACCENT);
     }
@@ -246,9 +250,11 @@ final class IslandView extends View {
         float ww = d(w), cy = getHeight() / 2f;
         shape(ww, d(h), cy, 0.1f * (1 - p) * (1 - n));
         canvas.drawPath(shape, fill);
+        // Black on a black picture has no edge; a faint rim keeps the island readable there.
+        canvas.drawPath(shape, rim);
         canvas.save();
         canvas.clipPath(shape);
-        float alpha = smooth((p - 0.55f) / 0.45f) * (1 - smooth(n / 0.35f));
+        float alpha = smooth((p - 0.3f) / 0.7f) * (1 - smooth(n / 0.35f));
         if (alpha > 0) drawContent(canvas, (ww - d(W)) / 2 - (1 - alpha) * d(6), cy - d(H) / 2, alpha);
         float nubAlpha = smooth((n - 0.6f) / 0.4f);
         if (nubAlpha > 0) icon(canvas, offAccent, ww / 2, cy, nubAlpha);
