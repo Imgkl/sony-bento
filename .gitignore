@@ -14,3 +14,6 @@ adbkey.pub
 launcher/assets/fonts/*.ttf
 launcher/assets/fonts/*.otf
 launcher/assets/fonts/*.txt
+# IBM Plex Mono is under the SIL Open Font License, so it ships in the repository.
+!launcher/assets/fonts/IBMPlexMono-SemiBold.ttf
+!launcher/assets/fonts/IBMPlexMono-OFL.txt

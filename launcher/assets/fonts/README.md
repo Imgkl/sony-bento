@@ -8,3 +8,5 @@ Download Satoshi from Fontshare and copy these three files into this folder befo
 - `Satoshi-Regular.ttf`
 - `Satoshi-Bold.ttf`
 - `Satoshi-Black.ttf`
+
+The volume dial's number uses [IBM Plex Mono](https://github.com/IBM/plex) SemiBold. It is under the SIL Open Font License, so `IBMPlexMono-SemiBold.ttf` and its licence, `IBMPlexMono-OFL.txt`, are already in this folder.

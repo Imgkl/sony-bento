@@ -139,6 +139,7 @@ I also uninstalled 9 apps that I had installed myself. They are not part of the 
 ## Credits
 
 - [Satoshi](https://www.fontshare.com/fonts/satoshi) by Indian Type Foundry (ITF Free Font License, not included).
+- [IBM Plex Mono](https://github.com/IBM/plex) by IBM, for the volume dial's number (SIL Open Font License, included).
 - Settings and remote icons: [Tabler Icons](https://tabler.io/icons) (MIT, by Paweł Kuna).
 - Apple and PlayStation logos: [Simple Icons](https://simpleicons.org) (CC0). The logos are trademarks of Apple Inc. and Sony Interactive Entertainment.
 - This project is not affiliated with Sony, Google, Apple or MediaTek.
