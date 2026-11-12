@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="620" viewBox="0 0 1520 620" role="img" aria-labelledby="title desc">
+  <title id="title">Sony volume display and Bento volume island compared</title>
+  <desc id="desc">An illustrated film scene appears twice. Sony's bottom display covers the subtitle on the left. Bento's dial sits at the left edge of the right scene, leaving the subtitle clear. Overlays are enlarged for clarity.</desc>
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#354451"/><stop offset="1" stop-color="#b3a08d"/></linearGradient>
+    <linearGradient id="shade" x2="0" y2="1"><stop offset=".5" stop-color="#080b10" stop-opacity="0"/><stop offset="1" stop-color="#080b10" stop-opacity=".8"/></linearGradient>
+    <clipPath id="screen"><rect width="704" height="396" rx="12"/></clipPath>
+    <g id="scene">
+      <rect width="704" height="396" fill="url(#sky)"/>
+      <circle cx="519" cy="104" r="34" fill="#e6cab0" opacity=".85"/>
+      <path d="M0 225 72 177 130 197 235 95 347 209 411 163 488 209 584 155 704 203V396H0Z" fill="#485159"/>
+      <path d="M0 282 103 243 220 272 333 197 451 262 559 236 704 274V396H0Z" fill="#2c383d"/>
+      <path d="M0 335 115 310 221 333 370 280 529 310 704 277V396H0Z" fill="#17282d"/>
+      <path d="M258 396 351 305 366 301 310 396Z" fill="#61716f" opacity=".35"/>
+      <rect width="704" height="396" fill="url(#shade)"/>
+      <text x="352" y="352" fill="#fff" text-anchor="middle" font-family="Arial, sans-serif" font-size="23" font-weight="600" stroke="#000" stroke-width="3" paint-order="stroke">We still have a long way to go.</text>
+    </g>
+    <g id="speaker" fill="none" stroke="#fff" stroke-linejoin="round" stroke-linecap="round" stroke-width="2">
+      <path d="M0 8H5L12 2V22L5 16H0Z" fill="#fff" stroke="none"/>
+      <path d="M16 7Q22 12 16 17M20 3Q30 12 20 21"/>
+    </g>
+  </defs>
+  <rect width="1520" height="620" rx="20" fill="#101112"/>
+  <g font-family="Arial, sans-serif">
+    <text x="32" y="50" fill="#8e9295" font-size="14" font-weight="700" letter-spacing="2">BEFORE</text>
+    <text x="32" y="86" fill="#f5f3ee" font-size="27" font-weight="600">Sony’s system display</text>
+    <text x="784" y="50" fill="#ff601b" font-size="14" font-weight="700" letter-spacing="2">AFTER</text>
+    <text x="784" y="86" fill="#f5f3ee" font-size="27" font-weight="600">Bento’s volume island</text>
+  </g>
+  <g transform="translate(32 114)" clip-path="url(#screen)">
+    <use href="#scene"/>
+    <rect x="184" y="315" width="336" height="60" rx="10" fill="#16191d" fill-opacity=".95"/>
+    <use href="#speaker" x="204" y="332"/>
+    <text x="253" y="351" fill="#fff" font-family="Arial, sans-serif" font-size="23">30</text>
+    <rect x="296" y="341" width="200" height="4" rx="2" fill="#64676b"/>
+    <rect x="296" y="341" width="60" height="4" rx="2" fill="#fff"/>
+  </g>
+  <g transform="translate(784 114)" clip-path="url(#screen)">
+    <use href="#scene"/>
+    <g transform="translate(0 115.5) scale(1.1)">
+      <path d="M-2 -14H0C0 -6.3 6.3 0 14 0H22C31.936 0 40 8.064 40 18V132C40 141.936 31.936 150 22 150H14C6.3 150 0 156.3 0 164H-2Z" fill="#000" stroke="#fff" stroke-opacity=".16" stroke-width="1"/>
+      <text x="20" y="23.4" fill="#f5f3ee" text-anchor="middle" font-family="monospace" font-size="15" font-weight="600">30</text>
+      <g fill="none" stroke="#f5f3ee" stroke-width="1.1" stroke-linecap="round">
+        <path d="M17.5 135H22.5" opacity="0.003"/>
+        <path d="M17.5 131H22.5" opacity="0.018"/>
+        <path d="M13 127H27" opacity="0.044"/>
+        <path d="M17.5 123H22.5" opacity="0.082"/>
+        <path d="M17.5 119H22.5" opacity="0.132"/>
+        <path d="M17.5 115H22.5" opacity="0.193"/>
+        <path d="M17.5 111H22.5" opacity="0.266"/>
+        <path d="M15.5 107H24.5" opacity="0.351"/>
+        <path d="M17.5 103H22.5" opacity="0.447"/>
+        <path d="M17.5 99H22.5" opacity="0.556"/>
+        <path d="M17.5 95H22.5" opacity="0.675"/>
+        <path d="M17.5 91H22.5" opacity="0.807"/>
+        <path d="M13 87H27" opacity="0.950"/>
+        <path d="M17.5 83H22.5" opacity="0.255"/>
+        <path d="M17.5 79H22.5" opacity="0.213"/>
+        <path d="M17.5 75H22.5" opacity="0.175"/>
+        <path d="M17.5 71H22.5" opacity="0.141"/>
+        <path d="M15.5 67H24.5" opacity="0.111"/>
+        <path d="M17.5 63H22.5" opacity="0.084"/>
+        <path d="M17.5 59H22.5" opacity="0.061"/>
+        <path d="M17.5 55H22.5" opacity="0.042"/>
+        <path d="M17.5 51H22.5" opacity="0.026"/>
+        <path d="M13 47H27" opacity="0.014"/>
+        <path d="M17.5 43H22.5" opacity="0.006"/>
+        <path d="M17.5 39H22.5" opacity="0.001"/>
+        <path d="M8 87H11.5M28.5 87H32" stroke-width="2"/>
+      </g>
+    </g>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="19" fill="#b7b9ba">
+    <text x="32" y="551">The bottom bar competes with subtitles.</text>
+    <text x="784" y="551">Volume stays at the edge. Subtitles stay clear.</text>
+    <text x="32" y="591" font-size="13" fill="#74787b">Layout illustration · overlays enlarged for clarity</text>
+  </g>
+</svg>
