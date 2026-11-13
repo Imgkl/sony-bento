@@ -225,7 +225,7 @@ public final class AdbVolumeConnection implements AutoCloseable {
         } finally {
             watchdog.cancel();
             close();
-            if (stopping && !cleanRestoration && !restoreOnly && readyQueued) {
+            if (stopping && !cleanRestoration && !restoreOnly) {
                 // The UI service may already be disabled. Complete one independent,
                 // restore-only attempt here; the durable guard prevents repeat crashes.
                 AdbVolumeConnection recovery = new AdbVolumeConnection(keyFile, apkPath, new Listener() {
@@ -256,6 +256,8 @@ public final class AdbVolumeConnection implements AutoCloseable {
     }
     public void confirmSafeVolume() { enqueue("CONFIRM_SAFE"); }
     public void cancelSafeVolume() { enqueue("CANCEL_SAFE"); }
+    public void controllerDismissed() { enqueue("DISMISSED"); }
+    public void safeWarningShown() { enqueue("SAFE_WARNING"); }
     public void stopAndRestore() {
         synchronized (lock) {
             if (closed || stopping) return;
@@ -371,6 +373,8 @@ public final class AdbVolumeConnection implements AutoCloseable {
         try { first = input.read(); }
         catch (SocketTimeoutException e) { if (idle) return null; throw e; }
         if (first < 0) throw new EOFException();
+        // Idle waiting is unbounded; only a packet that has started needs a read deadline.
+        if (idle) deadline = after(timeoutMs);
         byte[] header = new byte[24];
         header[0] = (byte) first;
         readFully(connection, input, header, 1, deadline);
@@ -427,7 +431,7 @@ public final class AdbVolumeConnection implements AutoCloseable {
         private final EventSink sink;
         private final byte[] header = new byte[5];
         private final ByteArrayOutputStream line = new ByteArrayOutputStream();
-        private int headerBytes, remaining, channel, stderrBytes;
+        private int headerBytes, remaining, channel;
         private boolean exited;
         private int exitCode = -1;
         ShellDecoder(EventSink sink) { this.sink = sink; }
@@ -455,9 +459,7 @@ public final class AdbVolumeConnection implements AutoCloseable {
                         if (line.size() >= LIMIT) throw protocol();
                         line.write(value);
                     }
-                } else if (channel == 2) {
-                    if (++stderrBytes > 65536) throw protocol();
-                } else { exited = true; exitCode = value & 255; }
+                } else if (channel == 3) { exited = true; exitCode = value & 255; }
                 if (--remaining == 0) headerBytes = 0;
             }
         }

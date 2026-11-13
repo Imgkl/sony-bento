@@ -14,6 +14,7 @@ import android.graphics.drawable.Icon;
 import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
@@ -29,9 +30,13 @@ import java.io.File;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Renders the shell-owned volume controller's events. Both remotes retain their native input path.
+ * Owns the volume callback Binder; the shell only registers it and performs privileged operations.
  * Android binds this enabled accessibility service after boot; opening the launcher is not required.
  */
 public class VolumeService extends AccessibilityService {
@@ -48,6 +53,10 @@ public class VolumeService extends AccessibilityService {
     private AlertDialog warning;
     private ExecutorService worker;
     private AdbVolumeConnection connection;
+    private AppVolumeController volumeController;
+    private boolean helperReady;
+    private boolean pendingDismiss;
+    private final AtomicBoolean restorationScheduled = new AtomicBoolean();
     private boolean active;
     private boolean islandAdded;
     private boolean controllerReady;
@@ -67,13 +76,33 @@ public class VolumeService extends AccessibilityService {
         running = new WeakReference<>(this);
         windows = getSystemService(WindowManager.class);
         worker = Executors.newSingleThreadExecutor(r -> new Thread(r, "BentoVolumeConnection"));
+        volumeController = new AppVolumeController(this, (source, event) -> handler.post(() -> {
+            if (!active || paused || volumeController != source) return;
+            // These callbacks arrive directly from AudioService, independently of ADB's lifetime.
+            String kind = event.optString("type");
+            if (kind.equals("volume") || kind.equals("safe_warning")) {
+                // Registration may succeed just before ADB loses its ready acknowledgement.
+                controllerReady = true;
+                hadController = true;
+            }
+            if (kind.equals("dismiss")) {
+                if (connection != null && helperReady) {
+                    connection.controllerDismissed();
+                    helperReady = false;
+                } else pendingDismiss = true;
+            }
+            if (connection != null && helperReady) {
+                if (kind.equals("safe_warning")) connection.safeWarningShown();
+            }
+            handleEvent(event);
+        }));
         getSystemService(NotificationManager.class).createNotificationChannel(
                 new NotificationChannel(CHANNEL, "Volume island recovery", NotificationManager.IMPORTANCE_LOW));
         island = new IslandView(this);
         island.setVisibilityListener(this::reportVisibility);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                Math.round(120 * getResources().getDisplayMetrics().density),
-                WindowManager.LayoutParams.MATCH_PARENT,
+                Math.round(IslandView.WINDOW_WIDTH_DP * getResources().getDisplayMetrics().density),
+                Math.round(IslandView.WINDOW_HEIGHT_DP * getResources().getDisplayMetrics().density),
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
@@ -137,11 +166,24 @@ public class VolumeService extends AccessibilityService {
                     pause("The volume helper could not start.");
                     break;
                 }
+                if (pendingDismiss) {
+                    pendingDismiss = false;
+                    helperReady = false;
+                    connection.controllerDismissed();
+                    break;
+                }
                 controllerReady = true;
+                helperReady = true;
                 hadController = true;
                 failures = 0;
                 getSystemService(NotificationManager.class).cancel(RECOVERY_NOTIFICATION);
                 reportVisibility(island.isFullyVisible());
+                // A warning may arrive while the new helper is attaching. Reconcile its state
+                // before enabling confirmation, including a cancellation during that interval.
+                if (warning != null) {
+                    connection.safeWarningShown();
+                    warning.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                } else connection.cancelSafeVolume();
                 Log.i(TAG, "Controller ready");
                 break;
             case "volume":
@@ -181,6 +223,7 @@ public class VolumeService extends AccessibilityService {
             case "restored":
                 if (kind.equals("restored")) hadController = false;
                 controllerReady = false;
+                helperReady = false;
                 clearWarning(false);
                 if (island != null) island.hideImmediately();
                 requestedRetryMs = MAX_RETRY_MS;
@@ -199,19 +242,13 @@ public class VolumeService extends AccessibilityService {
 
     private void disconnected(String reason) {
         connection = null;
-        controllerReady = false;
-        clearWarning(false);
-        if (island != null) island.hideImmediately();
+        helperReady = false;
+        // AudioService still holds our app Binder. Do not hide or retire a working controller
+        // merely because the privileged helper/ADB connection disappeared.
+        if (warning != null) warning.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
         Log.w(TAG, "Helper disconnected: " + reason);
         if (paused && active && hadController) {
-            worker.execute(() -> {
-                boolean restored = AdbVolumeConnection.restoreStock(new File(getFilesDir(), "adb-private.pk8"),
-                        getApplicationInfo().sourceDir);
-                handler.post(() -> {
-                    if (restored) hadController = false;
-                    else showRecoveryNotification("Sony's volume display needs recovery. Use Retry.");
-                });
-            });
+            verifyStockRestoration();
         }
         if (paused || !active) return;
         failures = Math.min(failures + 1, 6);
@@ -221,27 +258,28 @@ public class VolumeService extends AccessibilityService {
     }
 
     private void reportVisibility(boolean fullIslandVisible) {
-        if (connection != null && controllerReady) {
+        if (volumeController != null) volumeController.setVisible(fullIslandVisible || warning != null);
+        if (connection != null && helperReady && controllerReady) {
             connection.setVisible(fullIslandVisible || warning != null);
         }
     }
 
     private void showSafetyWarning() {
         if (warning != null) return;
-        final int attempt = generation;
         AlertDialog dialog = new AlertDialog.Builder(new ContextThemeWrapper(
                 this, android.R.style.Theme_DeviceDefault_Dialog_Alert))
                 .setTitle("Raise volume above the safe level?")
                 .setMessage("Listening at high volume for long periods can damage your hearing.")
                 .setPositiveButton("Continue", (which, button) -> {
-                    if (active && controllerReady && generation == attempt && connection != null) {
+                    if (active && controllerReady && helperReady && connection != null) {
+                        if (volumeController != null) volumeController.clearWarning();
                         connection.confirmSafeVolume();
                     }
                 })
-                .setNegativeButton("Cancel", (which, button) -> cancelSafetyWarning(attempt))
+                .setNegativeButton("Cancel", (which, button) -> cancelSafetyWarning())
                 .create();
         dialog.setCanceledOnTouchOutside(false);
-        dialog.setOnCancelListener(which -> cancelSafetyWarning(attempt));
+        dialog.setOnCancelListener(which -> cancelSafetyWarning());
         dialog.setOnDismissListener(which -> {
             if (warning == dialog) {
                 warning = null;
@@ -253,6 +291,7 @@ public class VolumeService extends AccessibilityService {
         warning = dialog;
         try {
             dialog.show();
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(helperReady);
             // A fresh confirmation never defaults to raising the safe limit.
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).requestFocus();
             reportVisibility(island.isFullyVisible());
@@ -263,15 +302,17 @@ public class VolumeService extends AccessibilityService {
         }
     }
 
-    private void cancelSafetyWarning(int attempt) {
-        if (active && controllerReady && generation == attempt && connection != null) {
+    private void cancelSafetyWarning() {
+        if (volumeController != null) volumeController.clearWarning();
+        if (active && controllerReady && helperReady && connection != null) {
             connection.cancelSafeVolume();
         }
     }
 
     private void clearWarning(boolean notifyHelper) {
+        if (volumeController != null) volumeController.clearWarning();
         if (warning == null) return;
-        if (notifyHelper) cancelSafetyWarning(generation);
+        if (notifyHelper) cancelSafetyWarning();
         AlertDialog old = warning;
         warning = null;
         old.dismiss();
@@ -279,12 +320,29 @@ public class VolumeService extends AccessibilityService {
 
     private void pause(String reason) {
         paused = true;
+        helperReady = false;
         controllerReady = false;
         clearWarning(false);
         if (island != null) island.hideImmediately();
         if (connection != null) connection.stopAndRestore();
+        else if (hadController) verifyStockRestoration();
         showRecoveryNotification(reason);
         Log.w(TAG, "Paused: " + reason);
+    }
+
+    private void verifyStockRestoration() {
+        if (worker == null || worker.isShutdown() || !restorationScheduled.compareAndSet(false, true)) return;
+        worker.execute(() -> {
+            boolean restored;
+            try {
+                restored = AdbVolumeConnection.restoreStock(new File(getFilesDir(), "adb-private.pk8"),
+                        getApplicationInfo().sourceDir);
+            } finally { restorationScheduled.set(false); }
+            handler.post(() -> {
+                if (restored) hadController = false;
+                else showRecoveryNotification("Sony's volume display needs recovery. Enable the island and use Retry.");
+            });
+        });
     }
 
     private void showRecoveryNotification(String reason) {
@@ -319,6 +377,7 @@ public class VolumeService extends AccessibilityService {
         connection = null;
         if (old != null) old.stopAndRestore();
         controllerReady = false;
+        helperReady = false;
         clearWarning(false);
         island.hideImmediately();
         failures = 0;
@@ -330,6 +389,29 @@ public class VolumeService extends AccessibilityService {
     private static Intent accessibilitySettings() {
         return new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    }
+
+    /** Provider calls execute on Binder threads; the overlay lease is checked on its owner thread. */
+    static Bundle controllerForShell(Bundle configuration) {
+        Bundle inactive = new Bundle();
+        inactive.putInt("v", 1);
+        inactive.putBoolean("active", false);
+        VolumeService service = running.get();
+        if (service == null) return inactive;
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicReference<Bundle> result = new AtomicReference<>(inactive);
+        service.handler.post(() -> {
+            try {
+                if (!service.active || service.paused || service.volumeController == null
+                        || service.island == null || !service.island.isAttachedToWindow()) return;
+                if (configuration != null) service.volumeController.configure(configuration);
+                result.set(service.volumeController.state());
+            } catch (Exception e) {
+                Log.w(TAG, "Controller handshake rejected", e);
+            } finally { finished.countDown(); }
+        });
+        try { return finished.await(2, TimeUnit.SECONDS) ? result.get() : null; }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); return null; }
     }
 
     /** Non-exported: the immutable notification action is the only external entrypoint. */
@@ -368,17 +450,20 @@ public class VolumeService extends AccessibilityService {
         AdbVolumeConnection old = connection;
         connection = null;
         controllerReady = false;
+        helperReady = false;
+        if (volumeController != null) {
+            volumeController.close();
+            volumeController = null;
+        }
         if (old != null) {
             old.stopAndRestore();
             // Give the helper time to restore Sony before closing a stalled transport.
             new Handler(Looper.getMainLooper()).postDelayed(old::close, 45_000);
-        } else if (hadController && worker != null) {
-            worker.execute(() -> {
-                boolean restored = AdbVolumeConnection.restoreStock(new File(getFilesDir(), "adb-private.pk8"),
-                        getApplicationInfo().sourceDir);
-                if (!restored) handler.post(() -> showRecoveryNotification(
-                        "Sony's volume display needs recovery. Enable the island and use Retry."));
-            });
+        }
+        if (hadController && worker != null) {
+            // Also covers a reconnect that closed before STOP/READY could be sent. Runs after
+            // the old connection; a verified restoration only performs a read-only confirmation.
+            verifyStockRestoration();
         }
         clearWarning(false);
         if (island != null) {

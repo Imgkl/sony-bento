@@ -17,9 +17,12 @@ import android.view.View;
  */
 final class IslandView extends View {
 
+    // The largest contour is 40 x 178 dp including its bezel fillets and rim.
+    static final int WINDOW_WIDTH_DP = 48, WINDOW_HEIGHT_DP = 190;
+
     private static final float W = 40, H = 150, NW = 22, NH = 32, RADIUS = 18, FILLET = 14;
     private static final float NUMBER = 15, NUMBER_Y = 18, DIAL_TOP = 36, DIAL_BOTTOM = 12, TICK_GAP = 4;
-    private static final long SHOW_MS = 1500, OPEN_MS = 220, CLOSE_MS = 180, PINCH_MS = 220;
+    private static final long SHOW_MS = 1500, OPEN_MS = 120, CLOSE_MS = 180, PINCH_MS = 220;
     private static final char[] DIGITS = "0123456789".toCharArray();
 
     enum State { HIDDEN, FULL, NUB }
@@ -254,7 +257,7 @@ final class IslandView extends View {
         canvas.drawPath(shape, rim);
         canvas.save();
         canvas.clipPath(shape);
-        float alpha = smooth((p - 0.3f) / 0.7f) * (1 - smooth(n / 0.35f));
+        float alpha = smooth(p) * (1 - smooth(n / 0.35f));
         if (alpha > 0) drawContent(canvas, (ww - d(W)) / 2 - (1 - alpha) * d(6), cy - d(H) / 2, alpha);
         float nubAlpha = smooth((n - 0.6f) / 0.4f);
         if (nubAlpha > 0) icon(canvas, offAccent, ww / 2, cy, nubAlpha);

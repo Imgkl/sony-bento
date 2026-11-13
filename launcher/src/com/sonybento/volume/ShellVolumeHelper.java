@@ -2,13 +2,11 @@ package com.sonybento.volume;
 
 import android.content.pm.ApplicationInfo;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.IInterface;
-import android.os.Parcel;
 import android.os.Process;
-import android.os.RemoteException;
 import android.os.SystemClock;
 import android.system.Os;
 import java.io.ByteArrayOutputStream;
@@ -21,7 +19,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -33,15 +30,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Shell-UID entrypoint. Owns only the volume-controller UI; never adjusts native volume input. */
+/** Shell-UID entrypoint. Registers the app-owned controller; never adjusts native volume input. */
 public final class ShellVolumeHelper {
     private static final String DESCRIPTOR = "android.media.IVolumeController";
     private static final File DIRECTORY = new File("/data/local/tmp/sony-bento-volume");
@@ -51,25 +46,39 @@ public final class ShellVolumeHelper {
     private final Handler worker;
     private final CountDownLatch finished = new CountDownLatch(1);
     private final ArrayDeque<Long> replacements = new ArrayDeque<>();
-    private final Controller controller;
+    private final IBinder controller;
     private final Object volumeInterface;
     private boolean stopping, tookController, ownsController, warningPending, visible;
 
-    private ShellVolumeHelper(OutputStream output, RecoveryGuard guard, Handler worker) throws Exception {
+    private ShellVolumeHelper(OutputStream output, RecoveryGuard guard, Handler worker, boolean restoreOnly) throws Exception {
         this.output = output;
         this.guard = guard;
         this.worker = worker;
+        this.tookController = guard.unclean();
         this.audio = new Audio();
-        controller = new Controller();
-        volumeInterface = Proxy.newProxyInstance(audio.volumeClass.getClassLoader(),
-                new Class<?>[]{audio.volumeClass}, (proxy, method, args) -> {
-                    if (method.getName().equals("asBinder")) return controller;
-                    if (method.getName().equals("toString")) return "SonyBentoVolumeController";
-                    if (method.getName().equals("hashCode")) return System.identityHashCode(proxy);
-                    if (method.getName().equals("equals")) return proxy == args[0];
-                    throw new UnsupportedOperationException("Local callback invocation");
-                });
-        controller.attachInterface((IInterface) volumeInterface, DESCRIPTOR);
+        if (restoreOnly) {
+            controller = null;
+            volumeInterface = null;
+        } else {
+            Bundle configuration = new Bundle();
+            configuration.putInt("v", 1);
+            Class<?> stub = Class.forName(DESCRIPTOR + "$Stub");
+            for (String name : new String[]{"displaySafeVolumeWarning", "volumeChanged", "masterMuteChanged",
+                    "setLayoutDirection", "dismiss", "setA11yMode"}) {
+                configuration.putInt(name, transaction(stub, name));
+            }
+            configuration.putBinder("audio", audio.binder);
+            configuration.putInt("isMasterMute", transaction(Class.forName("android.media.IAudioService$Stub"), "isMasterMute"));
+            Bundle session = appController("attach", configuration);
+            controller = session == null ? null : session.getBinder("controller");
+            if (controller == null || !DESCRIPTOR.equals(controller.getInterfaceDescriptor())) {
+                throw new GuardException("ui_unavailable", false, "The volume overlay is not ready yet.");
+            }
+            visible = session.getBoolean("visible");
+            warningPending = session.getBoolean("warningPending");
+            volumeInterface = stub.getMethod("asInterface", IBinder.class).invoke(null, controller);
+            controller.linkToDeath(() -> worker.post(this::stop), 0);
+        }
     }
 
     public static void main(String[] args) {
@@ -105,14 +114,16 @@ public final class ShellVolumeHelper {
                 }
                 thread = new HandlerThread("SonyBentoVolume");
                 thread.start();
-                ShellVolumeHelper helper = new ShellVolumeHelper(output, guard, new Handler(thread.getLooper()));
-                if (guard.unclean() || restoreOnly) {
-                    // A previous helper died without its EOF/STOP cleanup. Restore before any new takeover.
+                boolean needsRestoration = restoreOnly || guard.needsRestoration();
+                ShellVolumeHelper helper = new ShellVolumeHelper(output, guard, new Handler(thread.getLooper()), needsRestoration);
+                if (needsRestoration) {
+                    // Resume an interrupted explicit restoration. A plain helper disconnect does
+                    // not require restoration: AudioService still holds the app-owned Binder.
                     helper.tookController = true;
                     helper.worker.post(helper::stop);
                 } else {
                     emit(output, event("hello").put("uid", Process.myUid()));
-                    helper.worker.postDelayed(() -> { if (!helper.tookController) helper.stop(); }, 30_000);
+                    helper.worker.postDelayed(() -> { if (!helper.ownsController) helper.disconnected(); }, 30_000);
                     Thread reader = new Thread(() -> helper.readCommands(new FileInputStream(FileDescriptor.in)),
                             "SonyBentoVolumeInput");
                     reader.setDaemon(true);
@@ -163,7 +174,27 @@ public final class ShellVolumeHelper {
                 if (command.equals("STOP")) return;
             }
         } catch (IOException ignored) { }
-        worker.post(this::stop);
+        worker.post(this::disconnected);
+    }
+
+    private void disconnected() {
+        if (stopping) return;
+        if (tookController && controller != null && controller.isBinderAlive()) {
+            Bundle session = null;
+            try { session = appController("state", null); }
+            catch (Exception ignored) { }
+            if (session == null || (session.getBoolean("active")
+                    && controller.equals(session.getBinder("controller")))) {
+                // The overlay is still attached. Release the helper lock without restarting Sony;
+                // callbacks remain live and the next helper can re-register this exact Binder.
+                // A timed-out provider query is unknown, not proof that the overlay was stopped.
+                stopping = true;
+                worker.removeCallbacksAndMessages(null);
+                finished.countDown();
+                return;
+            }
+        }
+        stop();
     }
 
     private void command(String command) {
@@ -171,7 +202,7 @@ public final class ShellVolumeHelper {
         try {
             switch (command) {
                 case "READY":
-                    if (!tookController) {
+                    if (!ownsController) {
                         guard.begin();
                         tookController = true; // The setter may succeed remotely before a local exception.
                         register();
@@ -190,10 +221,13 @@ public final class ShellVolumeHelper {
                     }
                     break;
                 case "CANCEL_SAFE": warningPending = false; break;
+                case "SAFE_WARNING": if (ownsController) warningPending = true; break;
+                case "DISMISSED": controllerDismissed(); break;
                 case "STOP": stop(); break;
                 default: fail("protocol", "The volume helper received an invalid control message.");
             }
-        } catch (Exception e) { fail("controller", "The volume controller could not complete the request."); }
+        } catch (EventWriteException e) { disconnected(); }
+        catch (Exception e) { fail("controller", "The volume controller could not complete the request."); }
     }
 
     private void register() throws Exception {
@@ -205,46 +239,30 @@ public final class ShellVolumeHelper {
         volume(3, 0);
     }
 
-    private void callback(String name, int first, int second) {
+    private void controllerDismissed() {
         if (stopping) return;
-        try {
-            switch (name) {
-                case "volumeChanged": if (ownsController) volume(first, second); break;
-                case "masterMuteChanged": if (ownsController) volume(3, first); break;
-                case "displaySafeVolumeWarning":
-                    if (ownsController) {
-                        warningPending = true;
-                        emit(output, event("safe_warning").put("flags", first));
-                    }
-                    break;
-                case "setLayoutDirection": emit(output, event("layout").put("direction", first)); break;
-                case "setA11yMode": emit(output, event("a11y").put("mode", first)); break;
-                case "dismiss":
-                    // In this firmware AudioService sends dismiss when replacing its controller.
-                    ownsController = false;
-                    warningPending = false;
-                    visible = false;
-                    emit(output, event("dismiss"));
-                    long now = System.nanoTime();
-                    while (!replacements.isEmpty() && now - replacements.peekFirst() > 60_000_000_000L) {
-                        replacements.removeFirst();
-                    }
-                    if (replacements.size() >= 2) {
-                        fail("controller", "Another volume controller repeatedly replaced the island.");
-                    } else {
-                        replacements.addLast(now);
-                        worker.removeCallbacks(reacquire);
-                        worker.postDelayed(reacquire, 750);
-                    }
-                    break;
-                default: throw new IllegalStateException("Unknown callback");
-            }
-        } catch (Exception e) { fail("controller", "The volume controller callback failed."); }
+        // Direct app callbacks report replacement; the privileged registration alone
+        // remains here. Never send dismiss back to the app and create a relay loop.
+        ownsController = false;
+        warningPending = false;
+        visible = false;
+        long now = System.nanoTime();
+        while (!replacements.isEmpty() && now - replacements.peekFirst() > 60_000_000_000L) {
+            replacements.removeFirst();
+        }
+        if (replacements.size() >= 2) {
+            fail("controller", "Another volume controller repeatedly replaced the island.");
+        } else {
+            replacements.addLast(now);
+            worker.removeCallbacks(reacquire);
+            worker.postDelayed(reacquire, 750);
+        }
     }
 
     private final Runnable reacquire = () -> {
         if (stopping || ownsController) return;
         try { register(); }
+        catch (EventWriteException e) { disconnected(); }
         catch (Exception e) { fail("controller", "The volume controller could not reconnect."); }
     };
 
@@ -274,7 +292,7 @@ public final class ShellVolumeHelper {
                 try { audio.visible(volumeInterface, false); } catch (Exception ignored) { }
                 // Reserve on disk BEFORE the one crash attempt, including any failing attempt.
                 guard.reserveRecovery(SystemClock.elapsedRealtime());
-                try { restoreSony(); }
+                try { restoreSony(); guard.completeRecovery(); }
                 catch (Exception e) {
                     guard.disable();
                     error(output, "recovery_disabled", true,
@@ -398,28 +416,29 @@ public final class ShellVolumeHelper {
         return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    private final class Controller extends Binder {
-        final Map<Integer, String> callbacks = new HashMap<>();
-        Controller() throws Exception {
-            Class<?> stub = Class.forName(DESCRIPTOR + "$Stub");
-            for (String name : new String[]{"displaySafeVolumeWarning", "volumeChanged", "masterMuteChanged",
-                    "setLayoutDirection", "dismiss", "setA11yMode"}) {
-                Field field = stub.getDeclaredField("TRANSACTION_" + name);
-                field.setAccessible(true);
-                callbacks.put(field.getInt(null), name);
-            }
-        }
-        @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                throws RemoteException {
-            if (code == INTERFACE_TRANSACTION) { if (reply != null) reply.writeString(DESCRIPTOR); return true; }
-            String name = callbacks.get(code);
-            if (name == null) return super.onTransact(code, data, reply, flags);
-            data.enforceInterface(DESCRIPTOR);
-            int first = name.equals("dismiss") ? 0 : data.readInt();
-            int second = name.equals("volumeChanged") ? data.readInt() : 0;
-            if (data.dataAvail() != 0) return false;
-            worker.post(() -> callback(name, first, second));
-            return true;
+    private static int transaction(Class<?> stub, String name) throws Exception {
+        Field field = stub.getDeclaredField("TRANSACTION_" + name);
+        field.setAccessible(true);
+        return field.getInt(null);
+    }
+
+    private static Bundle appController(String method, Bundle configuration) throws Exception {
+        String authority = "com.sonybento.launcher.volume";
+        Service activity = service("activity", "android.app.IActivityManager");
+        IBinder token = new Binder();
+        Object holder = activity.call("getContentProviderExternal",
+                new Class<?>[]{String.class, int.class, IBinder.class, String.class}, authority, 0, token, "BentoVolume");
+        if (holder == null) return null;
+        try {
+            Object provider = holder.getClass().getField("provider").get(holder);
+            Class<?> attribution = Class.forName("android.content.AttributionSource");
+            Object caller = attribution.getConstructor(int.class, String.class, String.class)
+                    .newInstance(2000, "com.android.shell", null);
+            return (Bundle) Class.forName("android.content.IContentProvider").getMethod("call",
+                    attribution, String.class, String.class, String.class, Bundle.class)
+                    .invoke(provider, caller, authority, method, null, configuration);
+        } finally {
+            activity.call("removeContentProviderExternal", new Class<?>[]{String.class, IBinder.class}, authority, token);
         }
     }
 
@@ -434,9 +453,10 @@ public final class ShellVolumeHelper {
     private static class Service {
         final Class<?> type;
         final Object proxy;
+        final IBinder binder;
         Service(String name, String className) throws Exception {
             type = Class.forName(className);
-            IBinder binder = (IBinder) Class.forName("android.os.ServiceManager")
+            binder = (IBinder) Class.forName("android.os.ServiceManager")
                     .getMethod("getService", String.class).invoke(null, name);
             if (binder == null) throw new IOException("System service unavailable");
             proxy = Class.forName(className + "$Stub").getMethod("asInterface", IBinder.class).invoke(null, binder);
@@ -464,8 +484,8 @@ public final class ShellVolumeHelper {
     private static synchronized void emit(OutputStream output, JSONObject event) throws IOException {
         byte[] bytes = (event.toString() + "\n").getBytes(StandardCharsets.UTF_8);
         if (bytes.length > 4096) throw new IOException("Oversized event");
-        output.write(bytes);
-        output.flush();
+        try { output.write(bytes); output.flush(); }
+        catch (IOException e) { throw new EventWriteException(e); }
     }
     private static void error(OutputStream output, String code, boolean fatal, String detail, long retry) {
         try { emit(output, event("error").put("code", code).put("fatal", fatal).put("detail", detail)
@@ -474,6 +494,10 @@ public final class ShellVolumeHelper {
     }
     private static final class EOFExceptionCompat extends IOException {
         private static final long serialVersionUID = 1L;
+    }
+    private static final class EventWriteException extends IOException {
+        private static final long serialVersionUID = 1L;
+        EventWriteException(IOException cause) { super(cause); }
     }
 
     /** Durable single-owner guard; pure Java so failure/restart cases can be tested without a TV. */
@@ -505,50 +529,73 @@ public final class ShellVolumeHelper {
             catch (OverlappingFileLockException e) { lock = null; }
             if (lock == null) { channel.close(); throw new GuardException("already_running", false, "A volume helper already owns this session."); }
             RecoveryGuard guard = new RecoveryGuard(directory.toPath(), channel, lock, bootId);
-            try { if (reset) guard.save(); else guard.load(); return guard; }
+            try { if (reset) guard.reset(); else guard.load(); return guard; }
             catch (IOException e) { guard.close(); throw e; }
+        }
+        private void reset() throws IOException {
+            try { load(); }
+            catch (IOException e) { phase = "active"; }
+            // Reset the budget, not the obligation to restore an existing or unknown controller.
+            phase = phase.equals("idle") || phase.equals("cooldown") ? "idle" : "active";
+            failures = 0;
+            lastRecovery = until = 0;
+            save();
         }
         private void load() throws IOException {
             if (!Files.exists(stateFile, LinkOption.NOFOLLOW_LINKS)) return;
             if (Files.isSymbolicLink(stateFile) || Files.size(stateFile) > 1024) throw corrupt();
             Properties properties = new Properties();
             try (InputStream input = Files.newInputStream(stateFile, LinkOption.NOFOLLOW_LINKS)) { properties.load(input); }
+            catch (IllegalArgumentException e) { throw corrupt(); }
             try {
+                int version = Integer.parseInt(properties.getProperty("version", "1"));
+                if (version < 1 || version > 2) throw corrupt();
                 phase = properties.getProperty("phase", "");
                 failures = Integer.parseInt(properties.getProperty("failures", "-1"));
                 lastRecovery = Long.parseLong(properties.getProperty("lastRecovery", "-1"));
                 until = Long.parseLong(properties.getProperty("until", "-1"));
-                if (!phase.matches("idle|active|cooldown|disabled") || failures < 0 || failures > 2
+                if (!phase.matches("idle|active|restoring|cooldown|disabled") || failures < 0 || failures > 2
                         || lastRecovery < 0 || until < 0) throw corrupt();
                 if (!properties.getProperty("bootId", "").matches("[0-9a-fA-F-]{36}")) throw corrupt();
+                boolean changed = version == 1;
+                // The old format wrote cooldown before restoration was even attempted.
+                if (version == 1 && phase.equals("cooldown")) phase = "restoring";
                 if (!bootId.equals(properties.getProperty("bootId")) && !phase.equals("disabled")) {
                     // A Binder from an earlier kernel boot cannot survive. Normal power-on
                     // must not crash fresh SystemUI or count as an abnormal helper failure.
                     phase = "idle";
                     failures = 0;
                     lastRecovery = until = 0;
-                    save();
+                    changed = true;
                 }
+                if (changed) save();
             } catch (IllegalArgumentException e) { throw corrupt(); }
         }
         long waitMillis(long now) throws IOException {
             if (phase.equals("disabled") || now < lastRecovery) throw new GuardException("recovery_disabled", true,
                     "Automatic volume takeover is disabled; use explicit recovery to retry.");
-            return phase.equals("cooldown") ? Math.max(0, until - now) : 0;
+            return phase.equals("cooldown") || phase.equals("restoring") ? Math.max(0, until - now) : 0;
         }
-        boolean unclean() { return phase.equals("active"); }
+        boolean unclean() { return phase.equals("active") || phase.equals("restoring"); }
+        boolean needsRestoration() { return phase.equals("restoring"); }
         void begin() throws IOException { phase = "active"; save(); }
         void reserveRecovery(long now) throws IOException {
             failures = lastRecovery > 0 && now >= lastRecovery && now - lastRecovery < FAILURE_WINDOW_MS
                     ? Math.min(2, failures + 1) : 1;
             lastRecovery = now;
             until = now + COOLDOWN_MS;
-            phase = failures >= 2 ? "disabled" : "cooldown";
+            phase = failures >= 2 ? "disabled" : "restoring";
+            save();
+        }
+        void completeRecovery() throws IOException {
+            if (phase.equals("disabled")) return;
+            if (!phase.equals("restoring")) throw new IOException("No volume restoration was reserved");
+            phase = "cooldown";
             save();
         }
         void disable() throws IOException { phase = "disabled"; save(); }
         private void save() throws IOException {
-            byte[] bytes = ("phase=" + phase + "\nfailures=" + failures + "\nlastRecovery=" + lastRecovery
+            byte[] bytes = ("version=2\nphase=" + phase + "\nfailures=" + failures + "\nlastRecovery=" + lastRecovery
                     + "\nuntil=" + until + "\nbootId=" + bootId + "\n").getBytes(StandardCharsets.US_ASCII);
             Path temporary = Files.createTempFile(directory, ".recovery-", ".state");
             try {
